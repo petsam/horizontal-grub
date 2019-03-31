@@ -36,20 +36,20 @@ fi
 # Create work directory
 
 if [ -w /tmp ];then
-	WorkDir=/tmp/safesync-$(date +%s)
+	WorkDir=/tmp/horizontal-grub-$(date +%s)
 else
-	WorkDir=$HOME/.local/tmp/safesync-$(date +%s)
+	WorkDir=$HOME/.local/tmp/horizontal-grub-$(date +%s)
 fi
 mkdir -p "$WorkDir"
 echo "Created working directory :" "$WorkDir"
 cd $WorkDir
 
-if [ -f /bootgrub/grub.cfg ]; then
-	if [ -r /bootgrub/grub.cfg ]; then
-		cp /boot/grub/grub.cfg grub.cfg
+if [ $(ls /boot/grub | grep -Fo "grub.cfg") ]; then
+	if [ -r /boot/grub/grub.cfg ]; then
+		cp /boot/grub/grub.cfg "$WorkDir"/grub.cfg
 	else
-		pkexec cp /boot/grub/grub.cfg grub.cfg
-		pkexec chown $USER grub.cfg
+		pkexec cp /boot/grub/grub.cfg "$WorkDir"/grub.cfg
+		pkexec chown $USER "$WorkDir"/grub.cfg
 	fi
 else
 	echo "Grub configuration /boot/grub/grub.cfg was not found."
