@@ -34,17 +34,16 @@ fi
 # TODO consider a grub patch to have better distro names-labels in menus
 
 # Create work directory
-
+DateSuffix=$(date +%s)
 if [ -w /tmp ];then
-	WorkDir=/tmp/horizontal-grub-$(date +%s)
+	WorkDir=/tmp/horizontal-grub-"$DateSuffix"
 else
-	WorkDir=$HOME/.local/tmp/horizontal-grub-$(date +%s)
+	WorkDir=$HOME/.local/tmp/horizontal-grub-"$DateSuffix"
 fi
 mkdir -p "$WorkDir"
 echo "Created working directory :" "$WorkDir"
 cd $WorkDir
-
-if [ $(ls /boot/grub | grep -Fo "grub.cfg") ]; then
+if [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
 	if [ -r /boot/grub/grub.cfg ]; then
 		cp /boot/grub/grub.cfg "$WorkDir"/grub.cfg
 	else
@@ -81,9 +80,9 @@ function ParseDistros {
 	# Parse passed arguments
 
 	local EntriesType="$1"
-	echo "Entry Type is of " $EntriesType
+	#echo "Entry Type is of " $EntriesType
 	shift
-	echo "Arguments left are :" $#
+	#echo "Arguments left are :" $#
 	local -a DistroSections
 	SentDBs=$#
 	for (( i=0; i<$SentDBs; i++ ))
@@ -99,10 +98,10 @@ function ParseDistros {
 	for EntryBorder in ${DistroSections[@]}
 		do
 			CurrEntry="$(echo $EntryBorder | grep -iwoE "submenu|menuentry|}")"
-			echo "Entry is of Type " "$CurrEntry"
+			#echo "Entry is of Type " "$CurrEntry"
 			if [ "$CurrEntry" = "menuentry" ]; then
 				MainEntry[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
-				echo "Skipping... " ${MainEntry[$ProbedEntry]}
+				#echo "Skipping... " ${MainEntry[$ProbedEntry]}
 				IsParsable=1
 			elif [ "$CurrEntry" = "submenu" ]; then
 				IsParsable=0
@@ -111,7 +110,7 @@ function ParseDistros {
 				if [ "$IsParsable" = 0 ]; then
 					EntryEnd[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
 					LastBracketLine=${EntryEnd[$ProbedEntry]}
-					echo "Distro " "${ProbedEntry}" "Main Entry: " "${MainEntry[$ProbedEntry]}" "Start line: " "${EntryStart[$ProbedEntry]}" "End line: " "${EntryEnd[$ProbedEntry]}" "Last Bracket: " $LastBracketLine
+					#echo "Distro " "${ProbedEntry}" "Main Entry: " "${MainEntry[$ProbedEntry]}" "Start line: " "${EntryStart[$ProbedEntry]}" "End line: " "${EntryEnd[$ProbedEntry]}" "Last Bracket: " $LastBracketLine
 					((ProbedEntry+=1))
 				fi
 
@@ -135,14 +134,14 @@ function ParseDistros {
 
 	until [ $EntryOut = 0 ]
 		do
-			echo "Adding Entry: " $EntryOut
+			#echo "Adding Entry: " $EntryOut
 			((EntryOut-=1))
 			RStartLine=${EntryStart[$EntryOut]}
 			EntryLines=${EntryEnd[$EntryOut]}
 			MainLine=${MainEntry[$EntryOut]}
 			((RStartLine+=2))
 			((EntryLines-=$RStartLine))
-			echo "Entry lines to add: " $EntryLines
+			#echo "Entry lines to add: " $EntryLines
 			cat "$EntriesType" | grep "^$MainLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " " >> horizontal-grub.cfg
 			cat "$EntriesType" | grep -A ${EntryLines} "^$RStartLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
 		done
@@ -165,7 +164,7 @@ echo "
 
 ParseDistros "osprobed.cfg" ${OSproberDistros[@]}
 OsProberLastLine=$LastBracketLine
-echo "osprober last line: " $OsProberLastLine
+#echo "osprober last line: " $OsProberLastLine
 ParseDistros "maindistro.cfg" ${MainDistro[@]}
 ((OsProberLastLine+=1))
 cat osprobed.cfg | grep -A 2000 "^$OsProberLastLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg;
@@ -176,16 +175,24 @@ if [ -s horizontal-grub.cfg ]; then
 	echo "The new configuration file is created"
 	while true; do
 	read -p "Do you want to save it as your current /boot/grub/grub.cfg?
-	[Y]es [N]o" SaveGrubcfg
-	echo "$MyBranch"
+	[Y]es [N]o : " SaveGrubcfg
 	case $SaveGrubcfg in
 	[Yy]) echo "Copying to system..."
-		pkexec cp -b --suffix ."$(date +%s)" "$WorkDir"/grub.cfg /boot/grub/grub.cfg
+		pkexec cp -b --suffix ."$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg
+		GrubCopied=$?
+		if [ $GrubCopied ]; then
+			echo "The new horizontal-menu grub layout was successfully copied to system!"
+			echo "Happy grubbing!!"
+		else
+			echo "Unfortunately the file failed to be copied to system"
+			echo "Exiting..."
+			exit;
+		fi
 		# TODO ask to delete workdir
 		break ;;
 	[Nn]) echo " The new configuration file is saved at "$WorkDir"/grub.cfg"
 			echo "You may use this command to save at system (the old one is backed up)"
-			echo "sudo cp -b --suffix old "$WorkDir"/grub.cfg /boot/grub/grub.cfg "
+			echo "sudo cp -b --suffix old "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg "
 	break ;;
 		*) echo "   Answer [Y]es or [N]o. You will keep the file locally, if you answer 'No'" ;;
 	esac
