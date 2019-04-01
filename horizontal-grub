@@ -33,6 +33,10 @@ fi
 # TODO Unnecessary Special character in Grub entry REPORT at Manjaro grub
 # TODO consider a grub patch to have better distro names-labels in menus
 
+HorizontalMenuHeading="
+#### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####
+"
+
 # Create work directory
 DateSuffix=$(date +%s)
 if [ -w /tmp ];then
@@ -53,9 +57,16 @@ if [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
 else
 	echo "Grub configuration /boot/grub/grub.cfg was not found."
 	echo "Exiting..."
-	exit;
+	rmdir "$WorkDir"
+	exit 1;
 fi
 
+if (( $(cat grub.cfg | grep -cF "#### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####") >= 1 )); then
+	echo "This grub configuration is already transformed by horizontal-menu."
+	echo "Exiting..."
+	rmdir "$WorkDir"
+	exit 1;
+fi
 
 # Split sections
 
@@ -154,9 +165,7 @@ MainDistro=$(cat maindistro.cfg | grep -E "\:submenu|\:menuentry|\:}")
 
 # Add information message for grub transformation
 
-echo "
-#### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####
-" >> horizontal-grub.cfg
+echo $HorizontalMenuHeading >> horizontal-grub.cfg
 
 
 
