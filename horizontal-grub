@@ -85,21 +85,21 @@ elif [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
 else
 	echo "Grub configuration /boot/grub/grub.cfg was not found."
 	echo "Exiting..."
-	rmdir "$WorkDir"
+	rm -R "$WorkDir"
 	exit 1;
 fi
 
 if ! [ -f grub.cfg ]; then
 	echo "Grub configuration was not found."
 	echo "Exiting..."
-	rmdir "$WorkDir"
+	rm -R "$WorkDir"
 	exit 1;
 fi
 
 if (( $(cat grub.cfg | grep -cF "#### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####") >= 1 )); then
 	echo "This grub configuration is already transformed by horizontal-menu."
 	echo "Exiting..."
-	rmdir "$WorkDir"
+	rm -R "$WorkDir"
 	exit 1;
 fi
 
