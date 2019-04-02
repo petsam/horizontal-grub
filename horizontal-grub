@@ -52,7 +52,6 @@ elif [ $1 = "-h" ] || [ $1 = "--help" ]; then
 	exit;
 else
 	ArgCfg="$(pwd)"/"$1"
-	echo "$ArgCfg"
 	if [ -r "$ArgCfg" ]; then
 		GrubcfgPath="$ArgCfg"
 		CustomCfg=true
@@ -66,7 +65,7 @@ fi
 HorizontalMenuHeading="
 #### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####
 "
-
+echo "Transforming " $GrubcfgPath
 # Create work directory
 DateSuffix=$(date +%s)
 if [ -w /tmp ];then
@@ -77,15 +76,21 @@ fi
 mkdir -p "$WorkDir"
 echo "Created working directory :" "$WorkDir"
 cd $WorkDir
-if [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
-	if [ $CustomCfg ] || [ -r "$GrubcfgPath" ]; then
-		cp "$GrubcfgPath" "$WorkDir"/grub.cfg
-	else
+echo "Custom " $CustomCfg " grubpath " $GrubcfgPath
+if [ $CustomCfg = true ]; then
+		cp "$GrubcfgPath" grub.cfg
+elif [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
 		pkexec cp /boot/grub/grub.cfg "$WorkDir"/grub.cfg
 		pkexec chown $USER "$WorkDir"/grub.cfg
-	fi
 else
 	echo "Grub configuration /boot/grub/grub.cfg was not found."
+	echo "Exiting..."
+	rmdir "$WorkDir"
+	exit 1;
+fi
+
+if ! [ -f grub.cfg ]; then
+	echo "Grub configuration was not found."
 	echo "Exiting..."
 	rmdir "$WorkDir"
 	exit 1;
@@ -108,29 +113,29 @@ cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/30_os-prober ###" | gre
 
 function ParseDistros {
 	if [ $# = 0 ]; then
-		echo "No arguments passed. Something went wrong. Exiting..."
+		echo "Not grub compatible data in the file. Something is wrong. Exiting..."
 		return 1
 	elif [ $# = 1 ]; then
-		echo "Only one argument passed. Something went wrong. Exiting..."
+		echo "Not distro configuration found. Something went wrong. Exiting..."
 		return 1
-	else
-		echo $# " arguments passed. Starting parsing..."
 	fi
 
-
 	# Parse passed arguments
-
 	local EntriesType="$1"
-	#echo "Entry Type is of " $EntriesType
 	shift
-	#echo "Arguments left are :" $#
 	local -a DistroSections
 	SentDBs=$#
+
 	for (( i=0; i<$SentDBs; i++ ))
 		do
 			DistroSections[$i]=$1
 			shift
 		done
+
+	((SentDBs-=1))
+	((SentDBs/=4))
+	((SentDBs+=1))
+	echo $SentDBs " distro(s) found from " $EntriesType
 
 	# Get distro menus borders
 
@@ -138,11 +143,13 @@ function ParseDistros {
 	IsParsable=1
 	for EntryBorder in ${DistroSections[@]}
 		do
-			CurrEntry="$(echo $EntryBorder | grep -iwoE "submenu|menuentry|}")"
-			#echo "Entry is of Type " "$CurrEntry"
+			CurrEntry="$(echo $EntryBorder | grep -woE "submenu|menuentry|}")"
 			if [ "$CurrEntry" = "menuentry" ]; then
 				MainEntry[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
-				#echo "Skipping... " ${MainEntry[$ProbedEntry]}
+				MainClass[$ProbedEntry]=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
+				if [ "$EntriesType" = "maindistro.cfg" ]; then
+					MainDistroClass=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
+				fi
 				IsParsable=1
 			elif [ "$CurrEntry" = "submenu" ]; then
 				IsParsable=0
@@ -151,13 +158,18 @@ function ParseDistros {
 				if [ "$IsParsable" = 0 ]; then
 					EntryEnd[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
 					LastBracketLine=${EntryEnd[$ProbedEntry]}
-					#echo "Distro " "${ProbedEntry}" "Main Entry: " "${MainEntry[$ProbedEntry]}" "Start line: " "${EntryStart[$ProbedEntry]}" "End line: " "${EntryEnd[$ProbedEntry]}" "Last Bracket: " $LastBracketLine
 					((ProbedEntry+=1))
 				fi
 
 				IsParsable=1
 			fi
 		done
+
+	# Remove main distro class
+	if [ "$EntriesType" = "maindistro.cfg" ]; then
+		sed -i '/menuentry\^/ s/\-\-'$MainDistroClass'//g' "$WorkDir"/"$EntriesType"
+	fi
+
 	# Advanced submenu entries
 	if [ "$EntriesType" = "maindistro.cfg" ]; then
 		EntryOut=1
@@ -165,8 +177,7 @@ function ParseDistros {
 		EntryOut=0
 		for StartLine in ${EntryStart[@]}
 			do
-#				echo "StartLine: " $StartLine
-				cat "$EntriesType" | grep "^${StartLine}\:" | cut -d ":" -f2 | tr "^" " " >> horizontal-grub.cfg
+				cat "$EntriesType" | grep "^${StartLine}\:" | sed 's/Advanced\^options\^for\^/\ \ \>\>\>\>\ \ /' | cut -d ":" -f2 | tr "^" " " >> horizontal-grub.cfg
 				((EntryOut+=1))
 			done
 	fi
@@ -175,15 +186,17 @@ function ParseDistros {
 
 	until [ $EntryOut = 0 ]
 		do
-			#echo "Adding Entry: " $EntryOut
 			((EntryOut-=1))
 			RStartLine=${EntryStart[$EntryOut]}
 			EntryLines=${EntryEnd[$EntryOut]}
-			MainLine=${MainEntry[$EntryOut]}
-			((RStartLine+=2))
+
+			((RStartLine+=1))
 			((EntryLines-=$RStartLine))
-			#echo "Entry lines to add: " $EntryLines
-			cat "$EntriesType" | grep "^$MainLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " " >> horizontal-grub.cfg
+			if [ "$EntriesType" = "maindistro.cfg" ]; then
+			((EntryLines-=2))
+			fi
+			cat "$EntriesType" | grep "^$RStartLine\:" |  sed 's/class\^gnu-linux\^/'${MainClass[$EntryOut]}'\-\-class\^gnu-linux\^/g' | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
+			((RStartLine+=1))
 			cat "$EntriesType" | grep -A ${EntryLines} "^$RStartLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
 		done
 }
@@ -197,13 +210,10 @@ MainDistro=$(cat maindistro.cfg | grep -E "\:submenu|\:menuentry|\:}")
 
 echo $HorizontalMenuHeading >> horizontal-grub.cfg
 
-
-
 # Call parse function
 
 ParseDistros "osprobed.cfg" ${OSproberDistros[@]}
 OsProberLastLine=$LastBracketLine
-#echo "osprober last line: " $OsProberLastLine
 ParseDistros "maindistro.cfg" ${MainDistro[@]}
 ((OsProberLastLine+=1))
 cat osprobed.cfg | grep -A 2000 "^$OsProberLastLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg;
