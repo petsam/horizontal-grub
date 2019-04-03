@@ -76,7 +76,7 @@ fi
 mkdir -p "$WorkDir"
 echo "Created working directory :" "$WorkDir"
 cd $WorkDir
-echo "Custom " $CustomCfg " grubpath " $GrubcfgPath
+#echo "Custom " $CustomCfg " grubpath " $GrubcfgPath
 if [ $CustomCfg = true ]; then
 		cp "$GrubcfgPath" grub.cfg
 elif [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
@@ -147,6 +147,7 @@ function ParseDistros {
 			if [ "$CurrEntry" = "menuentry" ]; then
 				MainEntry[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
 				MainClass[$ProbedEntry]=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
+				MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
 				if [ "$EntriesType" = "maindistro.cfg" ]; then
 					MainDistroClass=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
 				fi
@@ -177,7 +178,8 @@ function ParseDistros {
 		EntryOut=0
 		for StartLine in ${EntryStart[@]}
 			do
-				cat "$EntriesType" | grep "^${StartLine}\:" | sed 's/Advanced\^options\^for\^/\ \ \>\>\>\>\ \ /' | cut -d ":" -f2 | tr "^" " " >> horizontal-grub.cfg
+				MainEntryName="\^\^\>\>\>\>\^\^"${MainName[$EntryOut]}
+				cat "$EntriesType" | grep "^${StartLine}\:" | awk -F "'" -v OFS="'" -v mainentry="$MainEntryName" ' { print $1, mainentry, $3, $4, $5 }' 2>/dev/null | cut -d ":" -f2,3,4 | tr "^" " " >> horizontal-grub.cfg
 				((EntryOut+=1))
 			done
 	fi
