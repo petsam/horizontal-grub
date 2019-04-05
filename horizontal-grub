@@ -42,26 +42,37 @@ HorizontalMenuHelp="horizontal-grub transforms the current grub configuration fi
 
 # Check for given command line parameters
 
-CustomCfg=false
+#CustomCfg=false
 if [ $# -eq 0 ]; then
-    #echo "No arguments provided"
-    #echo -e "$HorizontalMenuHelp"
 	GrubcfgPath="/boot/grub/grub.cfg"
 elif [ $1 = "-h" ] || [ $1 = "--help" ]; then
 	echo -e "$HorizontalMenuHelp"
 	exit;
 else
-	ArgCfg="$(pwd)"/"$1"
-	if [ -r "$ArgCfg" ]; then
-		GrubcfgPath="$ArgCfg"
-		CustomCfg=true
+	if [ ${1:0:1} = "/" ]; then
+		GrubcfgPath="$1"
 	else
-		echo "The provided argument is not a readable file"
+		GrubcfgPath="$(pwd)"/"$1"
+	fi
+	if [ ! -a "$GrubcfgPath" ]; then
+		echo "The provided file was not found"
 		echo -e "$HorizontalMenuHelp"
 		exit;
 	fi
 fi
-
+if [ $(stat -c "%U" $GrubcfgPath) = $(whoami) ]; then
+	echo "File is readable"
+	FileReadable=true
+elif [ $(echo $(groups) | grep -c $(stat -c "%G" $GrubcfgPath)) = 1 ] && [ ${$(stat -c "%a" $GrubcfgPath):-2:1} >= 4 ]; then
+	echo "File is readable"
+	FileReadable=true
+elif [ $(echo $(groups) | grep -c "wheel") = 1 ]; then
+	echo "File is not owned by you, but you are the administrator."
+	FileReadable=false
+else
+	echo "The file is not readable, or you have not permission to read"
+	exit;
+fi
 HorizontalMenuHeading="
 #### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####
 "
@@ -76,17 +87,12 @@ fi
 mkdir -p "$WorkDir"
 echo "Created working directory :" "$WorkDir"
 cd $WorkDir
-#echo "Custom " $CustomCfg " grubpath " $GrubcfgPath
-if [ $CustomCfg = true ]; then
-		cp "$GrubcfgPath" grub.cfg
-elif [ $(ls /boot/grub | grep -E "grub.cfg$") ]; then
-		pkexec cp /boot/grub/grub.cfg "$WorkDir"/grub.cfg
-		pkexec chown $USER "$WorkDir"/grub.cfg
-else
-	echo "Grub configuration /boot/grub/grub.cfg was not found."
-	echo "Exiting..."
-	rm -R "$WorkDir"
-	exit 1;
+GrubcfgAttrs=$(stat -c "%a" /boot/grub/grub.cfg)
+if [ $FileReadable = false ]; then
+	pkexec cp $GrubcfgPath "$WorkDir"/grub.cfg
+	pkexec chown $USER "$WorkDir"/grub.cfg
+elif [ $FileReadable = true ]; then
+	cp "$GrubcfgPath" grub.cfg
 fi
 
 if ! [ -f grub.cfg ]; then
@@ -229,6 +235,7 @@ if [ -s horizontal-grub.cfg ]; then
 	[Y]es [N]o : " SaveGrubcfg
 	case $SaveGrubcfg in
 	[Yy]) echo "Copying to system..."
+		chmod $GrubcfgAttrs horizontal-grub.cfg
 		pkexec cp -b --suffix ."$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg
 		GrubCopied=$?
 		if [ $GrubCopied ]; then
