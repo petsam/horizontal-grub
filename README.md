@@ -21,9 +21,10 @@ sudo cp horizontal-grub /usr/local/bin/
 
 ### Usage
 * Install a PrettyGrub compatible grub theme
-* Verify you have this in /etc/default/grub
+* Verify you have this (or using the defaults) in /etc/default/grub
 ```
 GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_SUBMENU=false
 ```
 * Update grub configuration (with `update-grub` or grub-mkconfig)
 * Run in terminal (as a normal user)
