@@ -54,17 +54,11 @@ else
 	else
 		GrubcfgPath="$(pwd)"/"$1"
 	fi
-	if [ ! -a "$GrubcfgPath" ]; then
-		echo "The provided file was not found"
-		echo -e "$HorizontalMenuHelp"
-		exit;
-	fi
 fi
+
 if [ $(stat -c "%U" $GrubcfgPath) = $(whoami) ]; then
-	echo "File is readable"
 	FileReadable=true
 elif [ $(echo $(groups) | grep -c $(stat -c "%G" $GrubcfgPath)) = 1 ] && [ ${$(stat -c "%a" $GrubcfgPath):-2:1} >= 4 ]; then
-	echo "File is readable"
 	FileReadable=true
 elif [ $(echo $(groups) | grep -c "wheel") = 1 ]; then
 	echo "File is not owned by you, but you are the administrator."
@@ -85,7 +79,6 @@ else
 	WorkDir=$HOME/.local/tmp/horizontal-grub-"$DateSuffix"
 fi
 mkdir -p "$WorkDir"
-echo "Created working directory :" "$WorkDir"
 cd $WorkDir
 GrubcfgAttrs=$(stat -c "%a" /boot/grub/grub.cfg)
 if [ $FileReadable = false ]; then
@@ -109,11 +102,21 @@ if (( $(cat grub.cfg | grep -cF "#### Trasformed grub menu to pseudo-horizontal 
 	exit 1;
 fi
 
+
 # Split sections
 
 cat grub.cfg | grep -Fm 1 -B 2000 "### BEGIN /etc/grub.d/10_linux ###" > horizontal-grub.cfg
 cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/10_linux ###" | grep -Fm 1 -B 2000 "### END /etc/grub.d/10_linux ###" | grep -nv ^# | tr " " "^" > maindistro.cfg
 cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/30_os-prober ###" | grep -Fm 1 -B 2000 "### END /etc/grub.d/30_os-prober ###" | grep -nv ^# | tr " " "^" > osprobed.cfg
+
+MultiBooter=$(cat osprobed.cfg | grep -cE "\:submenu|\:menuentry" 2>/dev/null)
+if [ $MultiBooter -eq 0 ]; then
+	echo "There was no other system configured by grub. You are not multibooting."
+	echo "There is no reason to use this script. Exiting..."
+	rm -R "$WorkDir"
+	exit 1;
+fi
+echo "Created working directory :" "$WorkDir"
 
 # Define Parse function
 
@@ -131,89 +134,153 @@ function ParseDistros {
 	shift
 	local -a DistroSections
 	SentDBs=$#
-
 	for (( i=0; i<$SentDBs; i++ ))
 		do
 			DistroSections[$i]=$1
 			shift
 		done
 
-	((SentDBs-=1))
-	((SentDBs/=4))
-	((SentDBs+=1))
-	echo $SentDBs " distro(s) found from " $EntriesType
-
+	AlienEntries="false"
+	if [ $EntriesType = "AlienDistros" ]; then
+		EntriesType="osprobed.cfg"
+		AlienEntries="true"
+	fi
 	# Get distro menus borders
 
 	ProbedEntry=0
 	IsParsable=1
+	IsAlien=1
 	for EntryBorder in ${DistroSections[@]}
 		do
 			CurrEntry="$(echo $EntryBorder | grep -woE "submenu|menuentry|}")"
+			#echo "Current Entry" $CurrEntry
 			if [ "$CurrEntry" = "menuentry" ]; then
-				MainEntry[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
-				MainClass[$ProbedEntry]=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
-				MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
-				if [ "$EntriesType" = "maindistro.cfg" ]; then
+				if [  "$EntriesType" = "osprobed.cfg" ] ; then
+					if [  $(echo $EntryBorder | grep -icwE "windows|osx|hurd|gnuhurd") -ge 1 ] ; then
+						EntryStart[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
+						MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
+						IsAlien=0
+						IsParsable=0
+					else
+						#MainEntry[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
+						MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
+						IsParsable=1
+					fi
+					MainClass[$ProbedEntry]=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
+					EntryAlien[$ProbedEntry]=$IsAlien
+				elif [ "$EntriesType" = "maindistro.cfg" ]; then
 					MainDistroClass=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
+					MainClass[$ProbedEntry]=$MainDistroClass
+					MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
+					IsParsable=1
 				fi
-				IsParsable=1
 			elif [ "$CurrEntry" = "submenu" ]; then
-				IsParsable=0
 				EntryStart[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
+				EntryAlien[$ProbedEntry]=$IsAlien
+				IsParsable=0
 			else
-				if [ "$IsParsable" = 0 ]; then
+				if [ $IsParsable -eq 0 ]; then
 					EntryEnd[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
 					LastBracketLine=${EntryEnd[$ProbedEntry]}
 					((ProbedEntry+=1))
 				fi
-
+				EntryAlien[$ProbedEntry]=$IsAlien
 				IsParsable=1
+				IsAlien=1
 			fi
 		done
-
+	#echo "Entry start" ${EntryStart[@]}
+	#echo "Entry end  " ${EntryEnd[@]}
 	# Remove main distro class
 	if [ "$EntriesType" = "maindistro.cfg" ]; then
-		sed -i '/menuentry\^/ s/\-\-'$MainDistroClass'//g' "$WorkDir"/"$EntriesType"
+		sed -i '/menuentry\^/ s/\-\-'$MainDistroClass'//g' "$EntriesType"
 	fi
 
 	# Advanced submenu entries
 	if [ "$EntriesType" = "maindistro.cfg" ]; then
 		EntryOut=1
-	else
+	elif [ "$EntriesType" = "osprobed.cfg" ]; then
 		EntryOut=0
-		for StartLine in ${EntryStart[@]}
-			do
-				MainEntryName="\^\^\>\>\>\>\^\^"${MainName[$EntryOut]}
-				cat "$EntriesType" | grep "^${StartLine}\:" | awk -F "'" -v OFS="'" -v mainentry="$MainEntryName" ' { print $1, mainentry, $3, $4, $5 }' 2>/dev/null | cut -d ":" -f2,3,4 | tr "^" " " >> horizontal-grub.cfg
-				((EntryOut+=1))
-			done
+		if [ $AlienEntries = "false" ]; then
+			for StartLine in ${EntryStart[@]}
+				do
+					if [ ${EntryAlien[$EntryOut]} -eq 1 ]  ; then
+						MainEntryName="\^\^\>\>\>\>\^\^"${MainName[$EntryOut]}
+						cat "$EntriesType" | grep "^${StartLine}\:" | awk -F "'" -v OFS="'" -v mainentry="$MainEntryName" ' { print $1, mainentry, $3, $4, $5 }' 2>/dev/null | cut -d ":" -f2,3,4 | tr "^" " " >> horizontal-grub.cfg
+					fi
+					((EntryOut+=1))
+				done
+		fi
 	fi
 
 # Distro menu sections
 
+if [ $AlienEntries = "false" ]; then
+	echo "Looking into " $EntriesType"..."
 	until [ $EntryOut = 0 ]
 		do
 			((EntryOut-=1))
+			if [ ${EntryAlien[$EntryOut]} -eq 1 ]  ; then
+				RStartLine=${EntryStart[$EntryOut]}
+				EntryLines=${EntryEnd[$EntryOut]}
+				echo "Found " $(echo  ${MainClass[$EntryOut]} | cut -d\^ -f2) "  " $(echo  ${MainName[$EntryOut]} | tr "^" " ")
+				((RStartLine+=1))
+				((EntryLines-=$RStartLine))
+				if [ "$EntriesType" = "maindistro.cfg" ]; then
+				((EntryLines-=2))
+				fi
+				cat "$EntriesType" | grep "^$RStartLine\:" |  sed 's/class\^gnu-linux\^/'${MainClass[$EntryOut]}'\-\-class\^gnu-linux\^/g' | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
+				((RStartLine+=1))
+				cat "$EntriesType" | grep -A ${EntryLines} "^$RStartLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
+			fi
+		done
+elif [ $AlienEntries = "true" ]; then
+	echo "Looking for Aliens..."
+	for entry in ${EntryStart[@]} ;
+	do
+		if [ ${EntryAlien[$EntryOut]} -eq 0 ]  ; then
 			RStartLine=${EntryStart[$EntryOut]}
 			EntryLines=${EntryEnd[$EntryOut]}
-
+			echo "Found " $(echo  ${MainClass[$EntryOut]} | cut -d\^ -f2) "  " $(echo  ${MainName[$EntryOut]} | tr "^" " ")
+			cat "$EntriesType" | grep "^$RStartLine\:" |  sed 's/'${MainClass[$EntryOut]}'\-\-//g' | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
 			((RStartLine+=1))
 			((EntryLines-=$RStartLine))
-			if [ "$EntriesType" = "maindistro.cfg" ]; then
-			((EntryLines-=2))
-			fi
-			cat "$EntriesType" | grep "^$RStartLine\:" |  sed 's/class\^gnu-linux\^/'${MainClass[$EntryOut]}'\-\-class\^gnu-linux\^/g' | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
-			((RStartLine+=1))
 			cat "$EntriesType" | grep -A ${EntryLines} "^$RStartLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg
-		done
+		fi
+		((EntryOut+=1))
+	done
+fi
+unset
 }
 
 # Define menu entries vars
 
 OSproberDistros=$(cat osprobed.cfg | grep -E "\:submenu|\:menuentry|\:}")
 MainDistro=$(cat maindistro.cfg | grep -E "\:submenu|\:menuentry|\:}")
+HasAlien=$(grep -icwE "windows|osx|darwin|hurd|gnuhurd" osprobed.cfg)
+if (( $HasAlien >= 1 )) ; then
+	echo "Found " $HasAlien " Alien entries : " $(grep -woE "windows|osx|hurd|gnuhurd" osprobed.cfg)
+	AlienDistros="true"
+else
+	AlienDistros="false"
+fi
+if (( $HasAlien >= 3 )); then
+	while true; do
+		read -p "It looks like an Alien invasion! Would you like to contain them in a separate page?
+		[Y]es [N]o : " AlienBox
+		case $AlienBox in
+			[Yy]) echo "This feature is not implemented yet. Please make a request to the developer."
+				sleep 3s
+				break ;;
+			[Nn]) echo "Fine by me. It's easier. Just watch them out!"
+				sleep 3s
+				break ;;
+			*) echo "   Answer [Y]es or [N]o. Is your keyboard broken?" ;;
 
+		esac
+	done
+
+fi
 # Add information message for grub transformation
 
 echo $HorizontalMenuHeading >> horizontal-grub.cfg
@@ -223,15 +290,18 @@ echo $HorizontalMenuHeading >> horizontal-grub.cfg
 ParseDistros "osprobed.cfg" ${OSproberDistros[@]}
 OsProberLastLine=$LastBracketLine
 ParseDistros "maindistro.cfg" ${MainDistro[@]}
+if [ $AlienDistros = "true" ]; then
+	ParseDistros "AlienDistros" ${OSproberDistros[@]}
+	OsProberLastLine=$LastBracketLine
+fi
 ((OsProberLastLine+=1))
 cat osprobed.cfg | grep -A 2000 "^$OsProberLastLine\:" | cut -d ":" -s -f 2,3,4 | tr "^" " "  >> horizontal-grub.cfg;
 cat grub.cfg | grep -Fm 1 -A 2000 "### END /etc/grub.d/30_os-prober ###" >> horizontal-grub.cfg;
 
-
 if [ -s horizontal-grub.cfg ]; then
 	echo "The new configuration file is created"
 	while true; do
-	read -p "Do you want to save it as your current /boot/grub/grub.cfg?
+	read -p "Do you want to save it as your current /boot/grub/grub.cfg (the old one will be backed up)?
 	[Y]es [N]o : " SaveGrubcfg
 	case $SaveGrubcfg in
 	[Yy]) echo "Copying to system..."
@@ -249,9 +319,9 @@ if [ -s horizontal-grub.cfg ]; then
 		# TODO ask to delete workdir
 		break ;;
 	[Nn]) echo " The new configuration file is saved at "$WorkDir"/grub.cfg"
-			echo "You may use this command to save at system (the old one is backed up)"
+			echo "You may use this command to save at system (the old one will be backed up)"
 			echo "sudo cp -b --suffix ."$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg "
-	break ;;
+			break ;;
 		*) echo "   Answer [Y]es or [N]o. You will keep the file locally, if you answer 'No'" ;;
 	esac
 	done
