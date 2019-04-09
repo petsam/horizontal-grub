@@ -14,7 +14,7 @@ It is developed and tested on Manjaro Linux (Arch based), but it should also wor
 
 ### Installation (suggested):
 ```
-git clone https://github.com/petsam/horizontal-grub.git
+curl -o horizontal-grub https://raw.githubusercontent.com/petsam/horizontal-grub/master/horizontal-grub
 chmod +x horizontal-grub
 sudo cp horizontal-grub /usr/local/bin/
 ```
