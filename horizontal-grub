@@ -102,6 +102,7 @@ if (( $(cat grub.cfg | grep -cF "#### Trasformed grub menu to pseudo-horizontal 
 	exit 1;
 fi
 
+echo "Created working directory :" "$WorkDir"
 
 # Split sections
 
@@ -109,14 +110,13 @@ cat grub.cfg | grep -Fm 1 -B 2000 "### BEGIN /etc/grub.d/10_linux ###" > horizon
 cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/10_linux ###" | grep -Fm 1 -B 2000 "### END /etc/grub.d/10_linux ###" | grep -nv ^# | tr " " "^" > maindistro.cfg
 cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/30_os-prober ###" | grep -Fm 1 -B 2000 "### END /etc/grub.d/30_os-prober ###" | grep -nv ^# | tr " " "^" > osprobed.cfg
 
-MultiBooter=$(cat osprobed.cfg | grep -cE "\:submenu|\:menuentry" 2>/dev/null)
-if [ $MultiBooter -eq 0 ]; then
-	echo "There was no other system configured by grub. You are not multibooting."
-	echo "There is no reason to use this script. Exiting..."
-	rm -R "$WorkDir"
-	exit 1;
-fi
-echo "Created working directory :" "$WorkDir"
+#MultiBooter=$(cat osprobed.cfg | grep -cE "\:submenu|\:menuentry" 2>/dev/null)
+#if [ $MultiBooter -eq 0 ]; then
+#	echo "There was no other system configured by grub. You are not multibooting."
+#	echo "There is no reason to use this script. Exiting..."
+#	rm -R "$WorkDir"
+#	exit 1;
+#fi
 
 # Define Parse function
 
@@ -125,7 +125,7 @@ function ParseDistros {
 		echo "Not grub compatible data in the file. Something is wrong. Exiting..."
 		return 1
 	elif [ $# = 1 ]; then
-		echo "Not distro configuration found. Something went wrong. Exiting..."
+		echo "No distro configuration found. Something went wrong. Exiting..."
 		return 1
 	fi
 
