@@ -25,9 +25,10 @@
 
 # Don't run as root or sudo
 if (( $(id -u) == 0 )); then
-    echo "You should not run this script as root"
-    echo "Exiting..."
-    exit;
+	IAMROOT=0
+else
+    echo "You should run this script as root to save your new grub configuration"
+    IAMROOT=1
 fi
 
 # TODO Unnecessary Special character in Grub entry REPORT at Manjaro grub
@@ -39,7 +40,7 @@ HorizontalMenuHelp="horizontal-grub transforms the current grub configuration fi
     horizontal-grub [PATH] If PATH is ommited, default /boot/grub/grub.cfg will be used
     horizontal-grub (-h --help) This help information message"
 
-
+MaxHGBackups="2"
 # Check for given command line parameters
 
 #CustomCfg=false
@@ -52,48 +53,50 @@ else
 	if [ ${1:0:1} = "/" ]; then
 		GrubcfgPath="$1"
 	else
-		GrubcfgPath="$(pwd)"/"$1"
+		if [ $IAMROOT -eq 0 ];then
+			GrubcfgPath=$(sudo -E -u $SUDO_USER pwd)/"$1"
+		else
+			GrubcfgPath=$(pwd)/"$1"
+		fi
 	fi
 fi
 
-if [ $(stat -c "%U" $GrubcfgPath) = $(whoami) ]; then
-	FileReadable=true
-elif [ $(echo $(groups) | grep -c $(stat -c "%G" $GrubcfgPath)) = 1 ] && [ ${$(stat -c "%a" $GrubcfgPath):-2:1} >= 4 ]; then
-	FileReadable=true
-elif [ $(echo $(groups) | grep -c "wheel") = 1 ]; then
-	echo "File is not owned by you, but you are the administrator."
-	FileReadable=false
+#if [ $(stat -c "%U" $GrubcfgPath) = $(whoami) ]; then
+#	FileReadable=true
+#elif [ $(echo $(groups) | grep -c $(stat -c "%G" $GrubcfgPath)) = 1 ] && [ ${$(stat -c "%a" $GrubcfgPath):-2:1} >= 4 ]; then
+#	FileReadable=true
+#elif [ $(echo $(groups) | grep -c "wheel") = 1 ]; then
+#	echo "File is not owned by you, but you are the administrator."
+#	FileReadable=false
+#else
+#	echo "The file is not readable, or you have not permission to read"
+#	exit;
+#fi
+
+if [ -r $GrubcfgPath ]; then
+	echo "The provided file is readable"
+elif [ -f $GrubcfgPath ] && [ ! -r $GrubcfgPath ]; then
+	echo "The provided file is not readable. You need to be root."
+	echo "Exiting"
+	exit 1;
 else
-	echo "The file is not readable, or you have not permission to read"
-	exit;
+	echo "The provided file could not be found."
+	echo "Exiting"
+	exit 127;
 fi
+
 HorizontalMenuHeading="
 #### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####
 "
 echo "Transforming " $GrubcfgPath
 # Create work directory
 DateSuffix=$(date +%s)
-if [ -w /tmp ];then
-	WorkDir=/tmp/horizontal-grub-"$DateSuffix"
-else
-	WorkDir=$HOME/.local/tmp/horizontal-grub-"$DateSuffix"
-fi
+WorkDir=${TMPDIR:-/tmp/}horizontal-grub-"$DateSuffix"
 mkdir -p "$WorkDir"
 cd $WorkDir
 GrubcfgAttrs=$(stat -c "%a" /boot/grub/grub.cfg)
-if [ $FileReadable = false ]; then
-	pkexec cp $GrubcfgPath "$WorkDir"/grub.cfg
-	pkexec chown $USER "$WorkDir"/grub.cfg
-elif [ $FileReadable = true ]; then
-	cp "$GrubcfgPath" grub.cfg
-fi
-
-if ! [ -f grub.cfg ]; then
-	echo "Grub configuration was not found."
-	echo "Exiting..."
-	rm -R "$WorkDir"
-	exit 1;
-fi
+cp "$GrubcfgPath" grub.cfg
+if [ ! $? ]; then echo "An error occured on file copy action. Exiting" ; exit 128; fi
 
 if (( $(cat grub.cfg | grep -cF "#### Trasformed grub menu to pseudo-horizontal by horizontal-grub ####") >= 1 )); then
 	echo "This grub configuration is already transformed by horizontal-menu."
@@ -110,14 +113,15 @@ cat grub.cfg | grep -Fm 1 -B 2000 "### BEGIN /etc/grub.d/10_linux ###" > horizon
 cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/10_linux ###" | grep -Fm 1 -B 2000 "### END /etc/grub.d/10_linux ###" | grep -nv ^# | tr " " "^" > maindistro.cfg
 cat grub.cfg | grep -Fm 1 -A 2000 "### BEGIN /etc/grub.d/30_os-prober ###" | grep -Fm 1 -B 2000 "### END /etc/grub.d/30_os-prober ###" | grep -nv ^# | tr " " "^" > osprobed.cfg
 
-#MultiBooter=$(cat osprobed.cfg | grep -cE "\:submenu|\:menuentry" 2>/dev/null)
-#if [ $MultiBooter -eq 0 ]; then
-#	echo "There was no other system configured by grub. You are not multibooting."
-#	echo "There is no reason to use this script. Exiting..."
-#	rm -R "$WorkDir"
-#	exit 1;
-#fi
-
+function NoMultiboot {
+MultiBooter=$(cat osprobed.cfg | grep -cE "\:submenu|\:menuentry" 2>/dev/null)
+if [ $MultiBooter -eq 0 ]; then
+	echo "There was no other system configured by grub. You are not multibooting."
+	echo "There is no reason to use this script. Exiting..."
+	rm -R "$WorkDir"
+	exit;
+fi
+}
 # Define Parse function
 
 function ParseDistros {
@@ -158,19 +162,24 @@ function ParseDistros {
 				if [  "$EntriesType" = "osprobed.cfg" ] ; then
 					if [  $(echo $EntryBorder | grep -icwE "windows|osx|hurd|gnuhurd") -ge 1 ] ; then
 						EntryStart[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
+						## TODO add feature to edit Alien Distros names
 						MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
 						IsAlien=0
 						IsParsable=0
 					else
 						#MainEntry[$ProbedEntry]=$(echo $EntryBorder | cut -d ":" -f1)
+						## TODO add feature to remove Linux from Linux Distros names
 						MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
 						IsParsable=1
 					fi
+					## TODO add feature to remove Linux from Linux class names for icon discovery
 					MainClass[$ProbedEntry]=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
 					EntryAlien[$ProbedEntry]=$IsAlien
 				elif [ "$EntriesType" = "maindistro.cfg" ]; then
+					## TODO add feature to remove Linux from Linux class names for icon discovery
 					MainDistroClass=$(echo $EntryBorder | awk -F "--" '{  print $2 }')
 					MainClass[$ProbedEntry]=$MainDistroClass
+					## TODO add feature to remove Linux from Linux Distros names
 					MainName[$ProbedEntry]=$(echo $EntryBorder |  awk -F "'" '{  print $2 }')
 					IsParsable=1
 				fi
@@ -301,14 +310,22 @@ cat grub.cfg | grep -Fm 1 -A 2000 "### END /etc/grub.d/30_os-prober ###" >> hori
 if [ -s horizontal-grub.cfg ]; then
 	echo "The new configuration file is created"
 	while true; do
-	read -p "Do you want to save it as your current /boot/grub/grub.cfg (the old one will be backed up)?
-	[Y]es [N]o : " SaveGrubcfg
+		if [ $IAMROOT -eq 0 ] ; then
+			read -p "Do you want to save it as your current /boot/grub/grub.cfg (the old one will be backed up)?
+			[Y]es [N]o : " SaveGrubcfg
+		else
+			SaveGrubcfg=N
+		fi
 	case $SaveGrubcfg in
 	[Yy]) echo "Copying to system..."
 		chmod $GrubcfgAttrs horizontal-grub.cfg
-		pkexec cp -b --suffix ."$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg
+		cp -b --suffix .hg-"$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg
 		GrubCopied=$?
 		if [ $GrubCopied ]; then
+			HGBackups=($(ls -1tr  /boot/grub/ | grep -E "grub.cfg.[0-9]*|grub.cfg.hg-[0-9]*"))
+			for (( Del=((${#HGBackups[*]}))-1 ; Del>=$MaxHGBackups ; Del-- )) ; do
+				rm /boot/grub/"${HGBackups[$Del]}"
+				done
 			echo "The new horizontal-menu grub layout was successfully copied to system!"
 			echo "Happy grubbing!!"
 		else
@@ -320,7 +337,7 @@ if [ -s horizontal-grub.cfg ]; then
 		break ;;
 	[Nn]) echo " The new configuration file is saved at "$WorkDir"/grub.cfg"
 			echo "You may use this command to save at system (the old one will be backed up)"
-			echo "sudo cp -b --suffix ."$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg "
+			echo "sudo cp -b --suffix .hg-"$DateSuffix" "$WorkDir"/horizontal-grub.cfg /boot/grub/grub.cfg "
 			break ;;
 		*) echo "   Answer [Y]es or [N]o. You will keep the file locally, if you answer 'No'" ;;
 	esac
