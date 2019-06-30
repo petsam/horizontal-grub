@@ -357,7 +357,7 @@ cat osprobed.cfg | grep -A 2000 "^$OsProberLastLine\:" | cut -d ":" -s -f 2,3,4 
 cat grub.cfg | grep -Fm 1 -A 2000 "### END /etc/grub.d/30_os-prober ###" >> horizontal-grub.cfg;
 
 if [ -s horizontal-grub.cfg ]; then
-	echo "The new configuration file is created as "$WorkDir"/horizontal-grub.cfg"
+	[ "$ShowActivity" = "true" ] && echo "The new configuration file is created as "$WorkDir"/horizontal-grub.cfg"
 	while [ "$SaveGrubcfg" = "" ]; do
 		read -p "Do you want to save it as your current /boot/grub/grub.cfg, ($MaxHGBackups backup(s) will be kept)?
 				[Y]es [N]o : " SaveGrubcfg
@@ -386,13 +386,15 @@ if [ -s horizontal-grub.cfg ]; then
 				[ ! x"${HGBackups[$Del]}" = "x" ]  && sudo rm /boot/grub/"${HGBackups[$Del]}"
 				done
 			[ "$ShowActivity" = "true" ] && ls -1lt  /boot/grub/ | grep -E "grub.cfg.[0-9]*|grub.cfg.hg-[0-9]*"
-			[ "$ShowActivity" = "true" ] && echo "The new horizontal-menu grub layout was successfully copied to system!
+			echo "The new horizontal-menu grub layout was successfully copied to system!
 	Happy grubing!!"
 		else
 			echo "Unfortunately the file failed to be copied to system"
 			echo "Exiting..."
 			exit;
 		fi
+	else
+		echo "The new configuration file is created as "$WorkDir"/horizontal-grub.cfg"
 	fi
 else
 	echo "There were errors and the grub configuration could not be created."
